@@ -1,5 +1,6 @@
 package com.example.bluetoothhotspotapp.ui
 
+import android.content.Intent
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
@@ -24,11 +25,22 @@ class SearchResultAdapter : ListAdapter<SearchResult, SearchResultAdapter.Search
 
     class SearchResultViewHolder(private val binding: ItemSearchResultBinding) :
         RecyclerView.ViewHolder(binding.root) {
+
         fun bind(searchResult: SearchResult) {
             binding.apply {
                 textViewTitle.text = searchResult.title
                 textViewSnippet.text = searchResult.snippet
                 textViewUrl.text = searchResult.url
+
+                // ACTUALIZADO: Usar MiniBrowserActivity en lugar de WebViewActivity
+                root.setOnClickListener {
+                    val context = root.context
+                    val intent = Intent(context, MiniBrowserActivity::class.java).apply {
+                        putExtra(MiniBrowserActivity.EXTRA_URL, searchResult.url)
+                        putExtra(MiniBrowserActivity.EXTRA_TITLE, searchResult.title)
+                    }
+                    context.startActivity(intent)
+                }
             }
         }
     }

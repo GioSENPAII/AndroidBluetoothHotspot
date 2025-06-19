@@ -1,5 +1,6 @@
 package com.example.bluetoothhotspotapp.di
 
+import android.content.Context
 import com.example.bluetoothhotspotapp.data.network.HtmlParser
 import com.example.bluetoothhotspotapp.data.network.SearchApiService
 import com.example.bluetoothhotspotapp.data.repository.SearchProcessor
@@ -20,8 +21,10 @@ object Injector {
         return provideRetrofit().create(SearchApiService::class.java)
     }
 
-    fun provideSearchProcessor(): SearchProcessor {
+    // ACTUALIZADO: Ahora requiere Context
+    fun provideSearchProcessor(context: Context): SearchProcessor {
         return SearchProcessor(
+            context = context,
             searchService = provideSearchApiService(),
             htmlParser = HtmlParser(),
             jsonSerializer = JsonSerializer()

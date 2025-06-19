@@ -1,17 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Permisos de Internet y Bluetooth -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
 
+    <!-- Permisos Bluetooth legacy (API < 31) -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+    <!-- Permisos Bluetooth nuevos (API >= 31) -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-    <application
 
+    <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -21,21 +26,42 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.IPN"
         tools:targetApi="31">
+
+        <!-- MainActivity - Pantalla principal -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/Theme.ESCOM">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".ui.ClientActivity" />
-        <activity android:name=".ui.HostActivity" />
 
+        <!-- ClientActivity - Cliente Bluetooth -->
+        <activity
+            android:name=".ui.ClientActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- HostActivity - Servidor Host -->
+        <activity
+            android:name=".ui.HostActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- MiniBrowserActivity - Navegador web offline -->
+        <activity
+            android:name=".ui.MiniBrowserActivity"
+            android:exported="false"
+            android:parentActivityName=".ui.ClientActivity" />
+
+        <!-- HostService - Servicio en primer plano -->
         <service
             android:name=".HostService"
+            android:exported="false"
             android:foregroundServiceType="dataSync" />
+
     </application>
 
 </manifest>

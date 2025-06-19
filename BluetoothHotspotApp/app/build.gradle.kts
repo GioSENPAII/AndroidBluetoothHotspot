@@ -65,4 +65,10 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("com.google.code.gson:gson:2.10.1")
 
+    // OkHttp para descargas
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+
+// Para manejo de imágenes (opcional)
+    implementation("com.github.bumptech.glide:glide:4.15.1")
+
 }

@@ -7,6 +7,8 @@ import android.bluetooth.BluetoothSocket
 import android.util.Log
 import com.example.bluetoothhotspotapp.Constants
 import com.example.bluetoothhotspotapp.data.model.SearchResult
+import com.example.bluetoothhotspotapp.data.model.WebPageResponse
+import com.example.bluetoothhotspotapp.data.network.BluetoothProtocol
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
@@ -19,13 +21,12 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.io.OutputStream
 import java.io.ByteArrayOutputStream
 import java.nio.charset.Charset
+
 @SuppressLint("MissingPermission")
 class BluetoothClientCommunicationManager(private val bluetoothAdapter: BluetoothAdapter?) : ClientCommunicationManager {
 
@@ -41,6 +42,10 @@ class BluetoothClientCommunicationManager(private val bluetoothAdapter: Bluetoot
 
     private val _searchResults = MutableSharedFlow<List<SearchResult>>()
     override val searchResults = _searchResults.asSharedFlow()
+
+    // NUEVO: Flow para resultados de páginas web
+    private val _webPageResults = MutableSharedFlow<WebPageResponse>()
+    val webPageResults = _webPageResults.asSharedFlow()
 
     override fun connectToDevice(device: BluetoothDevice) {
         if (_connectionState.value == ConnectionState.Connected) return
@@ -77,17 +82,30 @@ class BluetoothClientCommunicationManager(private val bluetoothAdapter: Bluetoot
         }
     }
 
+    // NUEVO: Método para solicitar páginas web
+    fun requestWebPage(url: String, includeImages: Boolean = true) {
+        commsScope.launch {
+            try {
+                val command = BluetoothProtocol.createGetPageCommand(url, includeImages)
+                outputStream?.write(command.toByteArray())
+                outputStream?.flush()
+            } catch (e: IOException) {
+                _connectionState.value = ConnectionState.Error("Error al enviar: ${e.message}")
+                disconnect()
+            }
+        }
+    }
+
     private fun listenForIncomingMessages() {
         startKeepAlive()
 
         commsScope.launch {
-            // No usaremos BufferedReader para evitar el problema del buffer interno.
             val gson = Gson()
             val stream = inputStream ?: return@launch
 
             while (isActive) { // Usamos isActive para respetar el ciclo de vida de la corrutina
                 try {
-                    // --- LÓGICA DE RECEPCIÓN COMPLETAMENTE NUEVA Y ROBUST ---
+                    // --- LÓGICA DE RECEPCIÓN COMPLETAMENTE NUEVA Y ROBUSTA ---
 
                     // 1. Leer byte por byte hasta encontrar el delimitador de nueva línea '\n'
                     val sizeBuffer = ByteArrayOutputStream()
@@ -117,11 +135,8 @@ class BluetoothClientCommunicationManager(private val bluetoothAdapter: Bluetoot
                     val receivedJson = String(jsonBuffer, Charset.defaultCharset())
                     Log.d("ClientBT", "JSON Recibido: $receivedJson")
 
-                    // 3. Procesar el JSON
-                    val listType = object : TypeToken<List<SearchResult>>() {}.type
-                    val results: List<SearchResult> = gson.fromJson(receivedJson, listType)
-                    _searchResults.emit(results)
-                    Log.d("ClientBT", "Resultados emitidos a la UI: ${results.size} items.")
+                    // 3. Determinar qué tipo de respuesta es y procesarla
+                    processJsonResponse(gson, receivedJson)
 
                 } catch (e: Exception) {
                     // Ahora los errores serán mucho más visibles
@@ -134,6 +149,40 @@ class BluetoothClientCommunicationManager(private val bluetoothAdapter: Bluetoot
         }
     }
 
+    private suspend fun processJsonResponse(gson: Gson, receivedJson: String) {
+        try {
+            // Determinar qué tipo de respuesta es
+            when {
+                receivedJson.contains("\"success\"") -> {
+                    // Es una WebPageResponse
+                    val webPageResponse: WebPageResponse = gson.fromJson(receivedJson, WebPageResponse::class.java)
+                    _webPageResults.emit(webPageResponse)
+                    Log.d("ClientBT", "WebPage response emitida: ${webPageResponse.success}")
+                }
+                receivedJson.startsWith("[") -> {
+                    // Es una lista de SearchResult (legacy)
+                    val listType = object : TypeToken<List<SearchResult>>() {}.type
+                    val results: List<SearchResult> = gson.fromJson(receivedJson, listType)
+                    _searchResults.emit(results)
+                    Log.d("ClientBT", "Resultados de búsqueda emitidos: ${results.size} items.")
+                }
+                else -> {
+                    // Intentar como lista de SearchResult por compatibilidad
+                    try {
+                        val listType = object : TypeToken<List<SearchResult>>() {}.type
+                        val results: List<SearchResult> = gson.fromJson(receivedJson, listType)
+                        _searchResults.emit(results)
+                        Log.d("ClientBT", "Resultados de búsqueda emitidos (fallback): ${results.size} items.")
+                    } catch (e: Exception) {
+                        Log.w("ClientBT", "No se pudo procesar la respuesta como SearchResult o WebPageResponse")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ClientBT", "Error al procesar JSON response", e)
+        }
+    }
+
     private fun disconnect() {
         try {
             _connectionState.value = ConnectionState.Disconnected
@@ -141,9 +190,10 @@ class BluetoothClientCommunicationManager(private val bluetoothAdapter: Bluetoot
             inputStream?.close()
             bluetoothSocket?.close()
         } catch (e: IOException) {
-            // Ignorar
+            // Ignorar errores al cerrar
         }
     }
+
     private fun startKeepAlive() {
         commsScope.launch {
             while (commsScope.isActive && _connectionState.value is ConnectionState.Connected) {
