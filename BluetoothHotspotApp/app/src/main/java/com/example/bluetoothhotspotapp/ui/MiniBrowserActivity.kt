@@ -6,23 +6,23 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import androidx.activity.viewModels
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.bluetoothhotspotapp.data.cache.WebContentCache
 import com.example.bluetoothhotspotapp.data.model.WebPageResponse
+import com.example.bluetoothhotspotapp.data.repository.BluetoothConnectionManager
+import com.example.bluetoothhotspotapp.data.repository.ConnectionState
 import com.example.bluetoothhotspotapp.databinding.ActivityMiniBrowserBinding
-import com.example.bluetoothhotspotapp.viewmodel.ClientViewModel
-import com.example.bluetoothhotspotapp.viewmodel.ViewModelFactory
 import kotlinx.coroutines.launch
 
 class MiniBrowserActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMiniBrowserBinding
-    private val viewModel: ClientViewModel by viewModels { ViewModelFactory(this) }
     private lateinit var webCache: WebContentCache
+    private var currentUrl: String? = null
 
     companion object {
         const val EXTRA_URL = "extra_url"
@@ -45,10 +45,11 @@ class MiniBrowserActivity : AppCompatActivity() {
             return
         }
 
+        currentUrl = url
         setupWebView()
         setupToolbar(title)
-        setupObservers()
-        loadPage(url)
+        setupBackPressedHandler()
+        checkConnectionAndLoadPage(url)
     }
 
     private fun setupWebView() {
@@ -78,11 +79,71 @@ class MiniBrowserActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupBackPressedHandler() {
+        // Manejo moderno del botón atrás
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (binding.webView.canGoBack()) {
+                    binding.webView.goBack()
+                } else {
+                    // Si no puede ir atrás en el WebView, cerrar la actividad
+                    finish()
+                }
+            }
+        })
+    }
+
+    private fun checkConnectionAndLoadPage(url: String) {
+        // Verificar si hay conexión Bluetooth activa
+        if (!BluetoothConnectionManager.isConnected()) {
+            binding.textStatus.text = "Error: No hay conexión con el Host"
+            Toast.makeText(this, "No hay conexión activa con el Host", Toast.LENGTH_LONG).show()
+
+            // Intentar cargar desde cache local
+            loadFromCacheOnly(url)
+            return
+        }
+
+        // Si hay conexión, proceder normalmente
+        setupObservers()
+        loadPage(url)
+    }
+
+    private fun loadFromCacheOnly(url: String) {
+        val cachedContent = webCache.getContent(url)
+        if (cachedContent != null) {
+            Log.d("MiniBrowser", "Cargando desde cache local (sin conexión)")
+            binding.textStatus.text = "Cargado desde cache (sin conexión)"
+            displayContent(cachedContent.htmlContent, cachedContent.cssContent)
+        } else {
+            binding.textStatus.text = "Página no disponible offline"
+            showErrorPage("Esta página no está disponible sin conexión al Host.")
+        }
+    }
+
     private fun setupObservers() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.webPageResults.collect { response ->
-                    handleWebPageResponse(response)
+        // Observar resultados de páginas web
+        BluetoothConnectionManager.webPageResults?.let { webPageFlow ->
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    webPageFlow.collect { response ->
+                        handleWebPageResponse(response)
+                    }
+                }
+            }
+        }
+
+        // Observar estado de conexión
+        BluetoothConnectionManager.connectionState?.let { connectionFlow ->
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    connectionFlow.collect { state ->
+                        if (state !is ConnectionState.Connected) {
+                            binding.textStatus.text = "Conexión perdida"
+                            // Si se pierde la conexión, intentar cargar desde cache
+                            currentUrl?.let { loadFromCacheOnly(it) }
+                        }
+                    }
                 }
             }
         }
@@ -93,14 +154,16 @@ class MiniBrowserActivity : AppCompatActivity() {
         val cachedContent = webCache.getContent(url)
         if (cachedContent != null) {
             Log.d("MiniBrowser", "Cargando desde cache local")
+            binding.textStatus.text = "Cargado desde cache"
             displayContent(cachedContent.htmlContent, cachedContent.cssContent)
             return
         }
 
-        // Solicitar al host
+        // Solicitar al host usando el singleton de conexión
         binding.progressBar.visibility = View.VISIBLE
         binding.textStatus.text = "Descargando página..."
-        viewModel.requestWebPage(url, includeImages = true)
+
+        BluetoothConnectionManager.requestWebPage(url, includeImages = true)
     }
 
     private fun handleWebPageResponse(response: WebPageResponse) {
@@ -115,16 +178,16 @@ class MiniBrowserActivity : AppCompatActivity() {
             }
 
             binding.textStatus.text = if (response.fromCache) {
-                "Cargado desde cache"
+                "Cargado desde cache del Host"
             } else {
-                "Descargado del host"
+                "Descargado del Host"
             }
 
             displayContent(content.htmlContent, content.cssContent)
 
         } else {
             binding.textStatus.text = "Error: ${response.error}"
-            Toast.makeText(this, "Error al cargar página: ${response.error}", Toast.LENGTH_LONG).show()
+            showErrorPage("Error al cargar página: ${response.error}")
         }
     }
 
@@ -168,16 +231,46 @@ class MiniBrowserActivity : AppCompatActivity() {
         binding.webView.loadDataWithBaseURL(null, fullHtml, "text/html", "UTF-8", null)
     }
 
+    private fun showErrorPage(message: String) {
+        val errorHtml = """
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        text-align: center; 
+                        padding: 20px;
+                        color: #666;
+                    }
+                    .error-icon { 
+                        font-size: 48px; 
+                        color: #ff6b6b; 
+                        margin-bottom: 20px; 
+                    }
+                    .error-message { 
+                        font-size: 18px; 
+                        margin-bottom: 10px; 
+                    }
+                    .error-details { 
+                        font-size: 14px; 
+                        color: #999; 
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="error-icon">⚠️</div>
+                <div class="error-message">No se pudo cargar la página</div>
+                <div class="error-details">$message</div>
+            </body>
+            </html>
+        """.trimIndent()
+
+        binding.webView.loadDataWithBaseURL(null, errorHtml, "text/html", "UTF-8", null)
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
-    }
-
-    override fun onBackPressed() {
-        if (binding.webView.canGoBack()) {
-            binding.webView.goBack()
-        } else {
-            super.onBackPressed()
-        }
     }
 }

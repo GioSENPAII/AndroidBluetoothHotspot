@@ -11,34 +11,37 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 class ClientViewModel(
-    private val communicationManager: ClientCommunicationManager
+    private val commManager: ClientCommunicationManager
 ) : ViewModel() {
 
-    // Flows existentes
-    val searchResults: Flow<List<SearchResult>> = communicationManager.searchResults
-    val connectionState: StateFlow<ConnectionState> = communicationManager.connectionState
+    // Exposer el manager Bluetooth para el singleton (con nombre diferente para evitar conflicto)
+    val bluetoothManager: BluetoothClientCommunicationManager? =
+        commManager as? BluetoothClientCommunicationManager
 
-    // NUEVO: Flow para resultados de páginas web
-    val webPageResults: Flow<WebPageResponse> = if (communicationManager is BluetoothClientCommunicationManager) {
-        communicationManager.webPageResults
+    // Flows existentes
+    val searchResults: Flow<List<SearchResult>> = commManager.searchResults
+    val connectionState: StateFlow<ConnectionState> = commManager.connectionState
+
+    // Flow para resultados de páginas web
+    val webPageResults: Flow<WebPageResponse> = if (commManager is BluetoothClientCommunicationManager) {
+        commManager.webPageResults
     } else {
         kotlinx.coroutines.flow.emptyFlow()
     }
 
     fun connectToDevice(device: BluetoothDevice) {
-        if (communicationManager is BluetoothClientCommunicationManager) {
-            communicationManager.connectToDevice(device)
+        if (commManager is BluetoothClientCommunicationManager) {
+            commManager.connectToDevice(device)
         }
     }
 
     fun onSearchClicked(query: String) {
-        communicationManager.sendQuery(query)
+        commManager.sendQuery(query)
     }
 
-    // NUEVO: Método para solicitar páginas web
     fun requestWebPage(url: String, includeImages: Boolean = true) {
-        if (communicationManager is BluetoothClientCommunicationManager) {
-            communicationManager.requestWebPage(url, includeImages)
+        if (commManager is BluetoothClientCommunicationManager) {
+            commManager.requestWebPage(url, includeImages)
         }
     }
 }

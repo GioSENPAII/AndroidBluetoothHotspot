@@ -9,12 +9,11 @@ import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.activity.viewModels
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.example.bluetoothhotspotapp.BaseActivity
+import com.example.bluetoothhotspotapp.data.repository.BluetoothConnectionManager
 import com.example.bluetoothhotspotapp.data.repository.ConnectionState
 import com.example.bluetoothhotspotapp.databinding.ActivityClientBinding
 import com.example.bluetoothhotspotapp.viewmodel.ClientViewModel
@@ -22,10 +21,9 @@ import com.example.bluetoothhotspotapp.viewmodel.ViewModelFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.example.bluetoothhotspotapp.databinding.DialogPairedDevicesBinding // Necesario para el DialogFragment
 
 @SuppressLint("MissingPermission")
-class ClientActivity : BaseActivity(), PairedDevicesDialogFragment.DeviceSelectionListener {
+class ClientActivity : AppCompatActivity(), PairedDevicesDialogFragment.DeviceSelectionListener {
 
     private lateinit var binding: ActivityClientBinding
     private val viewModel: ClientViewModel by viewModels { ViewModelFactory(this) }
@@ -39,14 +37,30 @@ class ClientActivity : BaseActivity(), PairedDevicesDialogFragment.DeviceSelecti
 
         val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter
+
         setupRecyclerView()
         setupListeners()
         observeViewModel()
+
+        // NUEVO: Registrar la conexión en el singleton
+        viewModel.bluetoothManager?.let { manager ->
+            BluetoothConnectionManager.initializeConnection(manager)
+        }
 
         if (!PermissionHelper.hasBluetoothPermissions(this)) {
             PermissionHelper.requestBluetoothPermissions(this)
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Verificar si ya estamos conectados cuando regresamos de MiniBrowser
+        val currentState = BluetoothConnectionManager.connectionState?.value
+        if (currentState is ConnectionState.Connected) {
+            updateUiForConnectionState(currentState)
+        }
+    }
+
     override fun onDeviceSelected(device: BluetoothDevice) {
         viewModel.connectToDevice(device)
     }
@@ -132,7 +146,20 @@ class ClientActivity : BaseActivity(), PairedDevicesDialogFragment.DeviceSelecti
                 binding.groupSearchBar.visibility = View.GONE       // Oculta la barra de búsqueda
                 binding.buttonConnect.visibility = View.VISIBLE     // Muestra el botón de conectar
                 supportActionBar?.subtitle = if (state is ConnectionState.Error) "Error de conexión" else "Desconectado"
+
+                // NUEVO: Limpiar la conexión del singleton si se desconecta
+                if (state is ConnectionState.Disconnected) {
+                    BluetoothConnectionManager.clearConnection()
+                }
             }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Solo limpiar la conexión si la actividad se está destruyendo por completo
+        if (isFinishing) {
+            BluetoothConnectionManager.clearConnection()
         }
     }
 }
